@@ -6,26 +6,23 @@
 
 use core::sync::atomic::{AtomicBool, Ordering};
 
-use daisy_embassy::audio::{AudioConfig, Fs, Interface};
-use daisy_embassy::hal::fmc::Fmc;
+use audio::run_audio;
+use daisy_embassy::audio::{AudioConfig, Fs};
 use daisy_embassy::hal::gpio::{Level, Output, Speed};
 use daisy_embassy::hal::interrupt;
 use daisy_embassy::hal::interrupt::{InterruptExt, Priority};
-use daisy_embassy::hal::peripherals::FMC;
 use daisy_embassy::hal::{exti::ExtiInput, gpio::Pull};
-use daisy_embassy::sdram::FmcDevice;
-use daisy_embassy::{audio::HALF_DMA_BUFFER_LENGTH, hal, new_daisy_board, sdram::SDRAM_SIZE};
+use daisy_embassy::{audio::HALF_DMA_BUFFER_LENGTH, hal, new_daisy_board};
 use defmt::{debug, info};
 use embassy_executor::{InterruptExecutor, Spawner};
 use embassy_futures::join::join;
-use embassy_time::{Delay, Timer};
-use stm32_fmc::Sdram;
+use embassy_time::Timer;
 use {defmt_rtt as _, panic_probe as _};
+
+mod audio;
 
 //take 48000(Hz) * 10(Sec) * 2(stereo)
 const BLOCK_LENGTH: usize = HALF_DMA_BUFFER_LENGTH;
-const LOOPER_LENGTH: usize = SDRAM_SIZE / core::mem::size_of::<u32>();
-const SILENCE: u32 = u32::MAX / 2;
 static RECORD_PRESSED: AtomicBool = AtomicBool::new(false);
 static CLEAR_PRESSED: AtomicBool = AtomicBool::new(false);
 static AUDIO_EXECUTOR: InterruptExecutor = InterruptExecutor::new();
@@ -33,153 +30,6 @@ static AUDIO_EXECUTOR: InterruptExecutor = InterruptExecutor::new();
 #[interrupt]
 unsafe fn SAI1() {
     AUDIO_EXECUTOR.on_interrupt()
-}
-
-enum LooperState {
-    Cleared,
-    Record,
-    Playback,
-    Overdub,
-}
-
-fn record(
-    recording_input: &[u32],
-    loop_buffer: &mut [u32],
-    cursor: usize,
-    looper_state: &mut LooperState,
-    record_end: &mut usize,
-) {
-    if cursor + BLOCK_LENGTH >= LOOPER_LENGTH {
-        *looper_state = LooperState::Playback;
-        *record_end = cursor;
-        info!("out of memory");
-        return;
-    }
-    loop_buffer[cursor..cursor + BLOCK_LENGTH].copy_from_slice(recording_input);
-}
-
-fn overdub(recording_input: &[u32], loop_buffer: &mut [u32], cursor: usize, record_end: usize) {
-    let remain = BLOCK_LENGTH.min(record_end - cursor);
-    let frac = BLOCK_LENGTH - remain;
-    loop_buffer[cursor..(cursor + remain)].copy_from_slice(&recording_input[0..remain]);
-    if frac > 0 {
-        loop_buffer[0..frac].copy_from_slice(&recording_input[remain..BLOCK_LENGTH]);
-    }
-}
-
-fn playback(output: &mut [u32], loop_buffer: &[u32], cursor: usize, record_end: usize) {
-    let remain = BLOCK_LENGTH.min(record_end - cursor);
-    let frac = BLOCK_LENGTH - remain;
-    for (i, val) in loop_buffer[cursor..(cursor + remain)].iter().enumerate() {
-        output[i] += *val;
-    }
-    if frac > 0 {
-        for (i, val) in loop_buffer[0..frac].iter().enumerate() {
-            output[remain + i] += *val;
-        }
-    }
-}
-
-fn increase_cursor(cursor: &mut usize, record_end: usize) {
-    *cursor += BLOCK_LENGTH;
-    if record_end != 0 && *cursor >= record_end {
-        *cursor -= record_end;
-        info!("loop!!");
-    }
-}
-
-#[embassy_executor::task]
-async fn run_audio(
-    mut interface: Interface<'static>,
-    mut sdram: Sdram<Fmc<'static, FMC>, FmcDevice>,
-    mut record_led: Output<'static>,
-    mut playback_led: Output<'static>,
-) {
-    let mut delay = Delay;
-    let loop_buffer = unsafe {
-        // Initialise controller and SDRAM
-        let ram_ptr: *mut u32 = sdram.init(&mut delay) as *mut _;
-
-        // Convert raw pointer to slice
-        core::slice::from_raw_parts_mut(ram_ptr, SDRAM_SIZE / core::mem::size_of::<u32>())
-    };
-
-    //clear loop_buffer
-    for smp in loop_buffer.iter_mut() {
-        *smp = SILENCE;
-    }
-
-    let mut record_end = 0;
-    let mut cursor = 0;
-
-    let mut looper_state = LooperState::Cleared;
-
-    interface
-        .start(|input, output| {
-            output.copy_from_slice(input); // Passthrough
-            if RECORD_PRESSED.load(Ordering::SeqCst) {
-                match looper_state {
-                    LooperState::Cleared => looper_state = LooperState::Record,
-                    LooperState::Record => {
-                        looper_state = LooperState::Playback;
-                        record_end = cursor;
-                    }
-                    LooperState::Playback => looper_state = LooperState::Overdub,
-                    LooperState::Overdub => looper_state = LooperState::Playback,
-                }
-                RECORD_PRESSED.store(false, Ordering::SeqCst);
-            }
-
-            if CLEAR_PRESSED.load(Ordering::SeqCst) {
-                looper_state = LooperState::Cleared;
-                record_end = 0;
-                cursor = 0;
-                CLEAR_PRESSED.store(false, Ordering::SeqCst);
-            }
-
-            match looper_state {
-                LooperState::Cleared => {}
-                LooperState::Record => {
-                    record(
-                        output,
-                        loop_buffer,
-                        cursor,
-                        &mut looper_state,
-                        &mut record_end,
-                    );
-                    increase_cursor(&mut cursor, record_end);
-                }
-                LooperState::Playback => {
-                    playback(output, loop_buffer, cursor, record_end);
-                    increase_cursor(&mut cursor, record_end);
-                }
-                LooperState::Overdub => {
-                    playback(output, loop_buffer, cursor, record_end);
-                    overdub(output, loop_buffer, cursor, record_end);
-                    increase_cursor(&mut cursor, record_end);
-                }
-            }
-
-            match looper_state {
-                LooperState::Cleared => {
-                    record_led.set_low();
-                    playback_led.set_low();
-                }
-                LooperState::Record => {
-                    record_led.set_high();
-                    playback_led.set_low();
-                }
-                LooperState::Playback => {
-                    record_led.set_low();
-                    playback_led.set_high();
-                }
-                LooperState::Overdub => {
-                    record_led.set_high();
-                    playback_led.set_high();
-                }
-            }
-        })
-        .await;
 }
 
 pub fn rcc_config() -> hal::Config {
