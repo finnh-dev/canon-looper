@@ -69,7 +69,11 @@ pub async fn run_audio(
     let mut looper_state = LooperState::Start;
     let mut cursor = 0;
     let mut loopback = 0;
-
+    info!(
+        "loop_buffer: {:x}, {:x}",
+        loop_buffer.as_ptr(),
+        loop_buffer.len() * size_of::<u32>()
+    );
     interface
         .start(|input, output| {
             let record_pressed = RECORD_PRESSED.swap(false, Ordering::SeqCst);
@@ -107,39 +111,39 @@ pub async fn run_audio(
                         delay_2.state = DelayLineState::Recording;
                         delay_3.state = DelayLineState::Playback(Iteration::Second);
 
-                        // delay_1.execute(input, loop_buffer, output, cursor);
-                        match &delay_1.state {
-                            DelayLineState::Recording => {
-                                delay_1.write(input, loop_buffer, cursor);
-                            }
-                            DelayLineState::Playback(_) => {
-                                for (i, smp) in output.iter_mut().enumerate() {
-                                    let index = delay_1.start + cursor + i;
-                                    if index > delay_1.end {
-                                        panic!("out of memory");
-                                    }
-                                    // info!("Playback: loopbuffer len: {}", loop_buffer.len());
-                                    *smp += loop_buffer[index];
-                                }
-                            }
-                        }
+                        delay_1.execute(input, loop_buffer, output, cursor);
+                        // match &delay_1.state {
+                        //     DelayLineState::Recording => {
+                        //         delay_1.write(input, loop_buffer, cursor);
+                        //     }
+                        //     DelayLineState::Playback(_) => {
+                        //         for (i, smp) in output.iter_mut().enumerate() {
+                        //             let index = delay_1.start + cursor + i;
+                        //             if index > delay_1.end {
+                        //                 panic!("out of memory");
+                        //             }
+                        //             // info!("Playback: loopbuffer len: {}", loop_buffer.len());
+                        //             *smp += loop_buffer[index];
+                        //         }
+                        //     }
+                        // }
 
-                        // delay_2.execute(input, loop_buffer, output, cursor);
-                        match &delay_2.state {
-                            DelayLineState::Recording => {
-                                delay_2.write(input, loop_buffer, cursor);
-                            }
-                            DelayLineState::Playback(_) => {
-                                for (i, smp) in output.iter_mut().enumerate() {
-                                    let index = delay_2.start + cursor + i;
-                                    if index > delay_2.end {
-                                        panic!("out of memory");
-                                    }
-                                    // info!("Playback: loopbuffer len: {}", loop_buffer.len());
-                                    *smp += loop_buffer[index];
-                                }
-                            }
-                        }
+                        delay_2.execute(input, loop_buffer, output, cursor);
+                        // match &delay_2.state {
+                        //     DelayLineState::Recording => {
+                        //         delay_2.write(input, loop_buffer, cursor);
+                        //     }
+                        //     DelayLineState::Playback(_) => {
+                        //         for (i, smp) in output.iter_mut().enumerate() {
+                        //             let index = delay_2.start + cursor + i;
+                        //             if index > delay_2.end {
+                        //                 panic!("out of memory");
+                        //             }
+                        //             // info!("Playback: loopbuffer len: {}", loop_buffer.len());
+                        //             *smp += loop_buffer[index];
+                        //         }
+                        //     }
+                        // }
                         if advance_cursor(&mut cursor, loopback) {
                             info!("Record: advancing state");
                             delay_1.advance();
@@ -200,6 +204,11 @@ impl DelayLine {
         loop_buffer: &mut [u32],
         cursor: usize,
     ) {
+        info!(
+            "loop_buffer: {:x}, {:x}",
+            loop_buffer.as_ptr(),
+            loop_buffer.len() * size_of::<u32>()
+        );
         match &self.state {
             DelayLineState::Recording => {
                 self.write(input, loop_buffer, cursor);
