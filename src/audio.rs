@@ -111,7 +111,10 @@ pub async fn run_audio(
                         delay_2.state = DelayLineState::Recording;
                         delay_3.state = DelayLineState::Playback(Iteration::Second);
 
+                        //triggers bug
                         delay_1.execute(input, loop_buffer, output, cursor);
+
+                        // manual inline prevents bug
                         // match &delay_1.state {
                         //     DelayLineState::Recording => {
                         //         delay_1.write(input, loop_buffer, cursor);
