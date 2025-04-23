@@ -1,5 +1,7 @@
 [target.thumbv7em-none-eabihf]
 runner = 'probe-rs run --chip STM32H750IBKx'
+# [target.thumbv7em-none-eabihf]
+# runner = "arm-none-eabi-gdb -q -x openocd.gdb"
 rustflags = [
   # --- KEEP existing `link-arg` flags ---
   "-C", "link-arg=-Tlink.x",
