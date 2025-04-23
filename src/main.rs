@@ -6,7 +6,7 @@
 
 use core::sync::atomic::{AtomicBool, Ordering};
 
-use audio::run_audio;
+use canon_looper::run_audio;
 use daisy_embassy::audio::{AudioConfig, Fs};
 use daisy_embassy::hal::gpio::{Level, Output, Speed};
 use daisy_embassy::hal::interrupt;
@@ -19,7 +19,7 @@ use embassy_futures::join::join;
 use embassy_time::Timer;
 use {defmt_rtt as _, panic_probe as _};
 
-mod audio;
+mod canon_looper;
 
 //take 48000(Hz) * 10(Sec) * 2(stereo)
 const BLOCK_LENGTH: usize = HALF_DMA_BUFFER_LENGTH;
