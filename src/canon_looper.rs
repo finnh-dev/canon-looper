@@ -42,7 +42,7 @@ impl StatusLeds {
                 self.led_green.set_low();
             }
             CanonLooperState::Play => {
-                self.led_red.set_high();
+                self.led_red.set_low();
                 self.led_green.set_high();
             }
         }
