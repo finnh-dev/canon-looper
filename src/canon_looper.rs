@@ -100,6 +100,17 @@ impl<'a> CanonLooper<'a> {
         }
     }
 
+    fn reset(&mut self) {
+        self.transition_to_state(CanonLooperState::Start);
+
+        self.delay_lines[0].state = DelayLineState::Recording;
+        self.delay_lines[1].state = DelayLineState::Wait(0);
+        self.delay_lines[2].state = DelayLineState::Wait(1);
+
+        self.cursor = 0;
+        self.loopback = 0;
+    }
+
     fn run(
         &mut self,
         record_pressed: bool,
@@ -108,10 +119,7 @@ impl<'a> CanonLooper<'a> {
         output: &mut [u32],
     ) {
         if clear_pressed {
-            self.state = CanonLooperState::Start;
-            self.cursor = 0;
-            self.loopback = 0;
-            self.status_leds.display_state(&self.state);
+            self.reset();
         }
         match self.state {
             CanonLooperState::Start => self.run_start(record_pressed, input),
@@ -136,9 +144,7 @@ impl<'a> CanonLooper<'a> {
             self.transition_to_state(CanonLooperState::Play);
             self.cursor = 0;
 
-            self.delay_lines[0].state = DelayLineState::Playback(Iteration::First);
-            self.delay_lines[1].state = DelayLineState::Recording;
-            self.delay_lines[2].state = DelayLineState::Playback(Iteration::Second);
+            self.delay_lines.iter_mut().for_each(|d| d.advance());
 
             self.delay_lines[0].execute(input, output, self.buffer, self.cursor);
             self.delay_lines[1].execute(input, output, self.buffer, self.cursor);
